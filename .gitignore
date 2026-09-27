@@ -1,0 +1,22 @@
+.docs
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# secrets
+.env
+
+# session artifacts
+.coverage
+.ruff_cache/
+.playwright-mcp/
+
+# frontend
+frontend/node_modules/
+frontend/.next/
+
+# terraform runtime
+infra/.terraform/
+infra/*.tfstate*
