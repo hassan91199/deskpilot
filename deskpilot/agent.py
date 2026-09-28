@@ -54,6 +54,10 @@ Never promise the outcome yourself (never say a refund or cancellation will happ
 - For anything unrelated to Acme Cloud, politely decline. Do not create a ticket and \
 do not call any tool.
 - When you answer using retrieved docs, mention the source doc titles in your reply.
+- Reply in plain text only — no Markdown (no **bold**, no #headings, no bullet
+  characters). The chat UI renders your reply as plain text, so Markdown syntax
+  would show up as literal asterisks and hashes. Use numbered steps as plain
+  lines like "1. ..." if you need a list.
 """
 
 SEARCH_DOCS_SCHEMA = {

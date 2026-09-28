@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -49,6 +50,22 @@ async def lifespan(app: FastAPI):  # pragma: no cover - real DB, exercised by ru
 
 
 app = FastAPI(title="DeskPilot", lifespan=lifespan)
+
+# Local-only demo: the Next.js dev server (frontend/) runs on a different
+# origin than the API. No auth in scope (build brief), so this stays a fixed
+# localhost allowlist rather than a wildcard. 3001 covers `next dev` falling
+# back when 3000 is already taken on the dev machine.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @dataclass(frozen=True)
