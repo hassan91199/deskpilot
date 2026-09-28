@@ -12,6 +12,7 @@ source = ["deskpilot", "eval"]
 # in the default suite) — exercised by the opt-in ingest/eval runs instead.
 omit = [
     "deskpilot/pgvector_store.py",
+    "deskpilot/pg_ticket_store.py",
     "deskpilot/ingest.py",
     "deskpilot/cli.py",
     "eval/run_eval.py",

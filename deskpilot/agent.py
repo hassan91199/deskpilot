@@ -5,10 +5,17 @@
 SDK directly, only the small `AssistantMessage`/`ToolCall` dataclasses below,
 so the loop's branching (round cap, tool routing, citation, escalation) is
 fully unit-testable per AGENTS.md's test-layer table.
+
+`run_turn_events` is the actual loop; `run_turn` just drains it and returns
+the final result, for callers (CLI, eval harness) that don't need the
+intermediate trace. The FastAPI SSE endpoint (`deskpilot.api`) consumes
+`run_turn_events` directly so it can stream tool calls/results as they
+happen, per the build brief's "visible trace" requirement — one loop
+implementation, not two copies to keep in sync.
 """
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 
 from deskpilot.accounts_store import AccountStore
@@ -137,6 +144,12 @@ class AgentResult:
     ticket_id: str | None
 
 
+@dataclass(frozen=True)
+class TraceEvent:
+    kind: str  # "tool_call" | "tool_result" | "final"
+    data: dict | AgentResult
+
+
 def _dispatch(name: str, arguments: dict, deps: AgentDeps) -> tuple[dict, str | None, dict]:
     """Runs one tool call. Returns (result to send back to the model, a ticket
     id if one was just created, {doc_id: doc_title} for any docs cited)."""
@@ -166,7 +179,11 @@ def _dispatch(name: str, arguments: dict, deps: AgentDeps) -> tuple[dict, str | 
         return visible, None, {}
 
     if name == "create_ticket":
+        # account_id comes from the session, same as get_account — never from
+        # the model's arguments, so a ticket can't be filed against a spoofed
+        # account.
         ticket = deps.ticket_store.create_ticket(
+            account_id=deps.session_account_id,
             subject=arguments["subject"],
             summary=arguments["summary"],
             priority=arguments["priority"],
@@ -182,12 +199,12 @@ def _with_sources(reply: str, titles: Sequence[str]) -> str:
     return f"{reply}\n\nSources: {', '.join(titles)}"
 
 
-def run_turn(
+def run_turn_events(
     query: str,
     chat_fn: ChatFn,
     deps: AgentDeps,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
-) -> AgentResult:
+) -> Iterator[TraceEvent]:
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": query},
@@ -201,7 +218,10 @@ def run_turn(
 
         if not assistant_message.tool_calls:
             reply = _with_sources(assistant_message.content or "", list(cited.values()))
-            return AgentResult(reply, tool_calls_made, list(cited.keys()), ticket_id)
+            yield TraceEvent(
+                "final", AgentResult(reply, tool_calls_made, list(cited.keys()), ticket_id)
+            )
+            return
 
         messages.append(
             {
@@ -219,10 +239,12 @@ def run_turn(
         )
         for tc in assistant_message.tool_calls:
             tool_calls_made.append(tc.name)
+            yield TraceEvent("tool_call", {"name": tc.name, "arguments": tc.arguments})
             result, new_ticket_id, new_cited = _dispatch(tc.name, tc.arguments, deps)
             if new_ticket_id:
                 ticket_id = new_ticket_id
             cited.update(new_cited)
+            yield TraceEvent("tool_result", {"name": tc.name, "result": result})
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
 
     reply = _with_sources(
@@ -230,4 +252,18 @@ def run_turn(
         "for a human to follow up.",
         list(cited.values()),
     )
-    return AgentResult(reply, tool_calls_made, list(cited.keys()), ticket_id)
+    yield TraceEvent("final", AgentResult(reply, tool_calls_made, list(cited.keys()), ticket_id))
+
+
+def run_turn(
+    query: str,
+    chat_fn: ChatFn,
+    deps: AgentDeps,
+    max_rounds: int = DEFAULT_MAX_ROUNDS,
+) -> AgentResult:
+    for event in run_turn_events(query, chat_fn, deps, max_rounds):
+        if event.kind == "final":
+            return event.data
+    raise AssertionError(  # pragma: no cover - run_turn_events always yields a final event
+        "run_turn_events ended without a final event"
+    )

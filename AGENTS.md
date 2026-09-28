@@ -43,9 +43,13 @@ Rules that keep the default suite hermetic:
   so unit/integration tests can use an in-memory fake instead of a real
   Postgres — no test container in the default gate.
 - Tests never depend on the host's `.env` — they patch env vars explicitly.
-- The eval harness (`eval/run_eval.py`) is the *only* place that calls real
-  OpenAI and a real seeded Postgres. It's a separate, explicitly-invoked
-  command, never part of `scripts/test.sh` or CI's default job.
+- Real OpenAI + real Postgres are only ever touched by explicitly-invoked
+  entrypoints — `eval/run_eval.py`, `deskpilot/cli.py`, `deskpilot/ingest.py`,
+  and the FastAPI app's `lifespan`/`get_stores`/`get_chat_fn`/`get_embed_fn`
+  (`deskpilot/api.py`) — never by `scripts/test.sh` or CI's default job.
+  `tests/test_api.py` exercises the real route/SSE wiring through
+  `TestClient`, but overrides every one of those dependency functions with a
+  fake, so the real lifespan never runs during tests.
 - A tiny in-memory fixture (a handful of docs/accounts) is enough for unit
   tests; the full seed set (`deskpilot/seed/`) is what `eval/run_eval.py`
   and local dev load into real Postgres.
@@ -56,6 +60,8 @@ Rules that keep the default suite hermetic:
 .venv/bin/python scripts/test.sh   # lint + format + full suite under coverage
 docker run --rm deskpilot          # same gate inside the container
 python -m eval.run_eval            # opt-in: the 10 locked queries against real APIs
+python -m deskpilot.cli            # opt-in: interactive agent loop against real APIs
+.venv/bin/uvicorn deskpilot.api:app --reload   # opt-in: the FastAPI app, real DB/OpenAI
 .venv/bin/ruff format deskpilot eval tests scripts   # format
 ```
 

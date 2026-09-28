@@ -1,9 +1,10 @@
-"""In-memory ticket creation for the CLI and eval agent loop.
+"""Ticket creation. `InMemoryTicketStore` is the unit-test double (and what
+the CLI/eval harness use by default); `deskpilot.pg_ticket_store.PgTicketStore`
+is the real Postgres-backed implementation the FastAPI app uses, matching the
+brief's "same Postgres holds accounts, subscriptions, tickets."
 
-A Postgres-backed store (matching the brief's "same Postgres holds accounts,
-subscriptions, tickets") lands with the FastAPI endpoints in DP-4, once
-`GET /tickets` needs a store that outlives a single process. Until then this
-is the only implementation `deskpilot.agent.run_turn` talks to.
+`account_id` always comes from `AgentDeps.session_account_id`, the same
+session-bound pattern as `get_account` — never from free-text the user typed.
 """
 
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from typing import Protocol
 @dataclass(frozen=True)
 class Ticket:
     id: str
+    account_id: str
     subject: str
     summary: str
     priority: str
@@ -20,16 +22,21 @@ class Ticket:
 
 
 class TicketStore(Protocol):
-    def create_ticket(self, subject: str, summary: str, priority: str) -> Ticket: ...
+    def create_ticket(
+        self, account_id: str, subject: str, summary: str, priority: str
+    ) -> Ticket: ...
+
+    def list_tickets(self, account_id: str | None = None) -> list[Ticket]: ...
 
 
 class InMemoryTicketStore:
     def __init__(self) -> None:
         self._tickets: list[Ticket] = []
 
-    def create_ticket(self, subject: str, summary: str, priority: str) -> Ticket:
+    def create_ticket(self, account_id: str, subject: str, summary: str, priority: str) -> Ticket:
         ticket = Ticket(
             id=f"TCK-{1000 + len(self._tickets) + 1}",
+            account_id=account_id,
             subject=subject,
             summary=summary,
             priority=priority,
@@ -37,5 +44,7 @@ class InMemoryTicketStore:
         self._tickets.append(ticket)
         return ticket
 
-    def list_tickets(self) -> list[Ticket]:
-        return list(self._tickets)
+    def list_tickets(self, account_id: str | None = None) -> list[Ticket]:
+        if account_id is None:
+            return list(self._tickets)
+        return [t for t in self._tickets if t.account_id == account_id]
