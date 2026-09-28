@@ -8,6 +8,9 @@ select = ["E", "F", "W", "I"]
 
 [tool.coverage.run]
 source = ["deskpilot", "eval"]
+# Real Postgres + real OpenAI only, by design (AGENTS.md: no network calls
+# in the default suite) — exercised by the opt-in ingest/eval runs instead.
+omit = ["deskpilot/pgvector_store.py", "deskpilot/ingest.py"]
 
 [tool.coverage.report]
 show_missing = true

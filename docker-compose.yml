@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: deskpilot
+      POSTGRES_PASSWORD: deskpilot
+      POSTGRES_DB: deskpilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - deskpilot_pgdata:/var/lib/postgresql/data
+
+volumes:
+  deskpilot_pgdata:
