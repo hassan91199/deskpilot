@@ -1,7 +1,14 @@
 import unittest
 
 from deskpilot.accounts_store import InMemoryAccountStore
-from deskpilot.agent import AgentDeps, AssistantMessage, ToolCall, _dispatch, run_turn
+from deskpilot.agent import (
+    AgentDeps,
+    AssistantMessage,
+    ToolCall,
+    _dispatch,
+    run_turn,
+    run_turn_events,
+)
 from deskpilot.retrieval import Chunk, InMemoryVectorStore
 from deskpilot.tickets_store import InMemoryTicketStore
 
@@ -231,6 +238,41 @@ class RoundCapTests(unittest.TestCase):
         self.assertEqual(chat_fn.call_count, 4)
         self.assertEqual(len(result.tool_calls), 4)
         self.assertIn("wasn't able to finish", result.reply)
+
+
+class RunTurnEventsTests(unittest.TestCase):
+    def test_yields_tool_call_then_tool_result_then_final(self):
+        chat_fn = ScriptedChatFn(
+            [
+                AssistantMessage(
+                    content=None,
+                    tool_calls=[
+                        ToolCall(id="c1", name="search_docs", arguments={"query": "rotate key"})
+                    ],
+                ),
+                AssistantMessage(content="Here's how.", tool_calls=[]),
+            ]
+        )
+        deps = _deps(vector_store=_store_with_confident_match())
+
+        events = list(run_turn_events("How do I rotate an API key?", chat_fn, deps))
+
+        self.assertEqual([e.kind for e in events], ["tool_call", "tool_result", "final"])
+        self.assertEqual(
+            events[0].data, {"name": "search_docs", "arguments": {"query": "rotate key"}}
+        )
+        self.assertEqual(events[1].data["name"], "search_docs")
+        self.assertTrue(events[1].data["result"]["confident"])
+        self.assertEqual(events[2].data.tool_calls, ["search_docs"])
+
+    def test_yields_only_final_when_no_tool_call_needed(self):
+        chat_fn = ScriptedChatFn([AssistantMessage(content="Declined.", tool_calls=[])])
+        deps = _deps()
+
+        events = list(run_turn_events("Who won the football match?", chat_fn, deps))
+
+        self.assertEqual([e.kind for e in events], ["final"])
+        self.assertEqual(events[0].data.reply, "Declined.")
 
 
 class DispatchTests(unittest.TestCase):
