@@ -31,7 +31,7 @@ assertion, a coverage floor, or a lint rule to make a change fit.
 | --- | --- | --- | --- | --- |
 | Unit | `tests/test_*.py` | in-process, fakes | free | Seed data integrity, retrieval/chunking logic, individual tool functions, agent-loop branching (LLM faked) |
 | Integration | `tests/test_agent.py`, `tests/test_api.py` | FastAPI `TestClient`, LLM + DB faked | free | Full turn: tool routing, round cap, SSE stream shape, escalation rules |
-| Frontend | `frontend/` (later) | component tests | free | Chat widget + trace panel rendering |
+| Frontend | `frontend/**/*.test.{ts,tsx}` | Vitest + React Testing Library, fetch mocked | free | `lib/api.ts` SSE parsing, `ChatWindow`/`TracePanel`/`AccountSwitcher` rendering and interaction |
 | Container | `docker run --rm deskpilot test` | same suite inside the image | free | Env parity: deps, entrypoint, permissions |
 | Eval (opt-in) | `eval/run_eval.py` | real OpenAI + seeded Postgres | ~cents/run | The 10 locked queries (`eval/test_set.py`): pass rate, latency, cost. Never part of the default suite. |
 | Real smoke | manual, or CI on-demand | live APIs, deployed service | small $ | Pre-recording sanity check before the walkthrough |
@@ -63,6 +63,8 @@ python -m eval.run_eval            # opt-in: the 10 locked queries against real 
 python -m deskpilot.cli            # opt-in: interactive agent loop against real APIs
 .venv/bin/uvicorn deskpilot.api:app --reload   # opt-in: the FastAPI app, real DB/OpenAI
 .venv/bin/ruff format deskpilot eval tests scripts   # format
+cd frontend && npm test            # frontend: Vitest component/unit suite
+cd frontend && npx tsc --noEmit && npm run lint   # frontend: type-check + eslint
 ```
 
 Coverage floor is set in `pyproject.toml` (`[tool.coverage.report] fail_under`).
