@@ -1,0 +1,12 @@
+.git
+.venv
+.env
+.env.*
+.docs
+__pycache__
+**/__pycache__
+*.pyc
+.coverage
+.ruff_cache
+.playwright-mcp
+frontend
