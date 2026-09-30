@@ -58,7 +58,9 @@ Rules that keep the default suite hermetic:
 
 ```sh
 .venv/bin/python scripts/test.sh   # lint + format + full suite under coverage
-docker run --rm deskpilot          # same gate inside the container
+docker build -t deskpilot .        # build the backend image
+docker run --rm deskpilot          # same gate inside the container (CMD defaults to "test")
+docker run --rm -p 8080:8080 --env-file .env deskpilot api   # run the API in the container
 python -m eval.run_eval            # opt-in: the 10 locked queries against real APIs
 python -m deskpilot.cli            # opt-in: interactive agent loop against real APIs
 .venv/bin/uvicorn deskpilot.api:app --reload   # opt-in: the FastAPI app, real DB/OpenAI
@@ -69,6 +71,15 @@ cd frontend && npx tsc --noEmit && npm run lint   # frontend: type-check + eslin
 
 Coverage floor is set in `pyproject.toml` (`[tool.coverage.report] fail_under`).
 Raise the floor when coverage grows; never lower it to land a change.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and every PR, two
+independent jobs: `backend` (`docker build` then `docker run --rm deskpilot`
+— the exact container gate above, so CI and local can never drift) and
+`frontend` (`npm ci`, `tsc --noEmit`, `eslint`, `vitest run` in `frontend/`).
+Deploying the built image (DP-8, Terraform on AWS) is a separate, deferred
+step — this workflow only proves the image and the frontend are green.
 
 ## Behaviour rules (from the build brief — enforce these in code and tests)
 

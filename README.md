@@ -5,9 +5,10 @@ AI customer support agent (RAG + account actions) for a fictional SaaS,
 (test-first) and `.docs/ai_support_agent_build_brief.md` for full scope.
 
 **Status:** seed data, retrieval (pgvector), the tool-calling agent loop,
-the FastAPI backend (`POST /chat` SSE, accounts, tickets), and a Next.js
-chat UI with a trace panel (`frontend/`) are in. The 10 locked eval queries
-pass (`eval/run_eval.py`). Not built yet: Docker/CI, the AWS Terraform
-deploy, and the recorded walkthrough. This section gets replaced with the
-real architecture diagram, setup steps, and measured eval numbers (DP-9) —
-no numbers are claimed here until they're measured.
+the FastAPI backend (`POST /chat` SSE, accounts, tickets), a Next.js chat UI
+with a trace panel (`frontend/`), the backend/frontend test suites, a
+Dockerfile, and CI (`.github/workflows/ci.yml`) are in. The 10 locked eval
+queries pass (`eval/run_eval.py`). Not built yet: the AWS Terraform deploy
+and the recorded walkthrough. This section gets replaced with the real
+architecture diagram, setup steps, and measured eval numbers (DP-9) — no
+numbers are claimed here until they're measured.
