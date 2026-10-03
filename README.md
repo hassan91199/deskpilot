@@ -8,7 +8,7 @@ alongside the reply.
 
 ## Demo
 
-[`docs/demo.mp4`](docs/demo.mp4) — a 77s local walkthrough of three of the
+[`docs/demo.mp4`](docs/demo.mp4) — a 74s local walkthrough of three of the
 ten locked eval queries, run against the real FastAPI backend, real
 Postgres/pgvector, and real OpenAI.
 
