@@ -17,6 +17,7 @@ never anything from the model's tool-call arguments.
 """
 
 import json
+import os
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -51,18 +52,29 @@ async def lifespan(app: FastAPI):  # pragma: no cover - real DB, exercised by ru
 
 app = FastAPI(title="DeskPilot", lifespan=lifespan)
 
-# Local-only demo: the Next.js dev server (frontend/) runs on a different
-# origin than the API. No auth in scope (build brief), so this stays a fixed
-# localhost allowlist rather than a wildcard. 3001 covers `next dev` falling
-# back when 3000 is already taken on the dev machine.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+
+def cors_allow_origins() -> list[str]:
+    # The Next.js dev server (frontend/) runs on a different origin than the
+    # API, same as the deployed frontend (S3+CloudFront) does. No auth in
+    # scope (build brief), so this stays a fixed allowlist rather than a
+    # wildcard. 3001 covers `next dev` falling back when 3000 is already
+    # taken on the dev machine. FRONTEND_ORIGIN is set by infra/ (DP-8) to
+    # the deployed frontend's domain; unset locally, where only the
+    # dev-server origins apply.
+    origins = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
-    ],
+    ]
+    if frontend_origin := os.environ.get("FRONTEND_ORIGIN"):
+        origins.append(frontend_origin)
+    return origins
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_allow_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

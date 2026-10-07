@@ -68,6 +68,25 @@ docker run --rm deskpilot                                  # test mode (default)
 docker run --rm -p 8000:8080 --env-file .env deskpilot api # api mode
 ```
 
+## Deploy
+
+AWS only (EC2+Caddy for the API and a Postgres+pgvector container, S3+
+CloudFront for the static-exported frontend), DNS on Cloudflare. Default
+state is torn down — nothing runs, nothing costs money, until a client
+actually wants to see it live. Exactly two commands, both GitHub Actions
+workflows (`workflow_dispatch`, gated behind the `production` environment):
+
+- **Bring up**: run `demo-up` — builds the image, `terraform apply`s
+  `infra/`, builds and syncs the frontend, reseeds the docs/accounts/tickets
+  schema fresh (ingest runs on every boot, not just once), and smoke-tests
+  the result.
+- **Tear down**: run `demo-down` — `terraform destroy`, full stop.
+
+`infra/` is Terraform from the start, not bolted on after a manual deploy —
+see `infra/main.tf` for the resource graph and `scripts/infra_plan_real.sh`
+for a local, read-only `terraform plan` against the real AWS account before
+ever running `demo-up`.
+
 ## Tests and CI
 
 ```bash
@@ -110,15 +129,12 @@ estimated here per the build brief's "don't estimate" rule).
   integration task on top of this, not something already built.
 - No public live demo — shown as a recorded walkthrough and screenshots
   (see "Demo" above) until revenue supports always-on hosting; the AWS
-  Terraform deploy (`infra/`) is written but run on demand, not left up.
+  deploy (`infra/`) is run on demand for an actual client ask, not left up.
 
 ## Status
 
 Done: seed data + locked eval set, pgvector retrieval, the tool-calling
 agent loop, the FastAPI backend (`POST /chat` SSE, accounts, tickets), the
 Next.js chat UI with a trace panel, backend/frontend test suites, a
-Dockerfile, CI, and this README/diagram/recording.
-
-Not built yet: the AWS Terraform deploy (`infra/`) — deferred, low
-priority, not required for the demo since it's shown as a recording rather
-than a live link.
+Dockerfile, CI, this README/diagram/recording, and the AWS Terraform deploy
+(`infra/`, see "Deploy" above).
