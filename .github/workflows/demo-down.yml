@@ -1,0 +1,53 @@
+name: demo-down
+
+# Manual, approval-gated: tears down everything demo-up.yml created (EC2
+# api+postgres instance, S3+CloudFront frontend, Cloudflare DNS) in one
+# terraform destroy. The tiny Terraform state bucket and the ECR repo are
+# intentionally NOT destroyed here - both are outside the managed resource
+# graph and cost a fraction of a cent/month, kept so the next demo-up has
+# somewhere to push an image and to find its state.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  demo-down:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Resolve AWS account ID
+        id: account
+        run: echo "id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16"
+
+      - name: Terraform destroy
+        working-directory: infra
+        env:
+          # image_uri's value doesn't matter for a destroy, but the AWS
+          # provider validates the AMI/instance config (modules/ec2_api)
+          # even while refreshing state before a destroy plan, so it has to
+          # look like a real ECR image URI.
+          TF_VAR_image_uri: ${{ steps.account.outputs.id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/deskpilot:unused
+          TF_VAR_frontend_bucket_name: ${{ vars.FRONTEND_BUCKET_NAME }}
+          TF_VAR_frontend_domain_name: ${{ vars.FRONTEND_DOMAIN_NAME }}
+          TF_VAR_api_domain_name: ${{ vars.API_DOMAIN_NAME }}
+          TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TF_VAR_openai_api_key_param_arn: ${{ vars.OPENAI_API_KEY_PARAM_ARN }}
+        run: |
+          terraform init -input=false
+          terraform destroy -auto-approve -input=false
+
+      - name: Summary
+        run: echo "## Environment is down - no EC2, CloudFront, or S3-frontend cost remains." >> "$GITHUB_STEP_SUMMARY"

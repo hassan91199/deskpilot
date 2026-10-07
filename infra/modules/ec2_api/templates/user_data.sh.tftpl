@@ -1,0 +1,87 @@
+#!/bin/bash
+# DP-8: postgres + api + Caddy, all on the instance's host network so the
+# api container can reach postgres at localhost:5432 with no custom docker
+# network, and Caddy's reverse_proxy target (127.0.0.1:$CONTAINER_PORT)
+# keeps working unchanged. No AWS-managed proxy in the request path (see
+# modules/ec2_api/main.tf) - Caddy terminates TLS and gets its own Let's
+# Encrypt cert directly.
+set -eux
+
+dnf install -y docker unzip bind-utils
+systemctl enable --now docker
+
+curl -fsS "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+unzip -q /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install
+
+REGION="${region}"
+IMAGE_URI="${image_uri}"
+CONTAINER_PORT="${container_port}"
+DOMAIN="${domain_name}"
+LOG_GROUP="${log_group}"
+DB_URL="postgresql://deskpilot:deskpilot@localhost:5432/deskpilot"
+
+ECR_REGISTRY="$(echo "$IMAGE_URI" | cut -d/ -f1)"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+docker pull "$IMAGE_URI"
+
+docker run -d --name postgres --restart unless-stopped --network host \
+  -e POSTGRES_USER=deskpilot -e POSTGRES_PASSWORD=deskpilot -e POSTGRES_DB=deskpilot \
+  --log-driver awslogs --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="$LOG_GROUP" --log-opt awslogs-create-group=true \
+  --log-opt awslogs-stream=postgres \
+  pgvector/pgvector:pg16
+
+until docker exec postgres pg_isready -U deskpilot -q; do sleep 2; done
+
+DOCKER_ENV_ARGS=(-e "PORT=$CONTAINER_PORT" -e "DATABASE_URL=$DB_URL")
+
+%{ for name, value in plain_env_vars ~}
+DOCKER_ENV_ARGS+=(-e "${name}=${value}")
+%{ endfor ~}
+
+%{ for name, arn in secret_env_vars ~}
+SECRET_VALUE="$(aws ssm get-parameter --name '${arn}' --with-decryption --region "$REGION" --query 'Parameter.Value' --output text)"
+DOCKER_ENV_ARGS+=(-e "${name}=$SECRET_VALUE")
+%{ endfor ~}
+
+# One-shot ingest, re-run on every boot since postgres is reseeded from
+# scratch every cycle - bypasses docker-entrypoint.sh's test/api cases
+# entirely, so no entrypoint change was needed for this.
+docker run --rm --network host "$${DOCKER_ENV_ARGS[@]}" --entrypoint python "$IMAGE_URI" -m deskpilot.ingest
+
+# Exposed directly over plain HTTP too (not just via Caddy below) so CI can
+# smoke-test the container the moment it's up, without waiting on DNS/TLS.
+docker run -d --name api --restart unless-stopped --network host \
+  --log-driver awslogs --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="$LOG_GROUP" --log-opt awslogs-create-group=true \
+  --log-opt awslogs-stream=api \
+  "$${DOCKER_ENV_ARGS[@]}" \
+  "$IMAGE_URI" api
+
+mkdir -p /etc/caddy
+cat > /etc/caddy/Caddyfile <<CADDYFILE
+$DOMAIN {
+    reverse_proxy 127.0.0.1:$CONTAINER_PORT
+}
+CADDYFILE
+
+# The Cloudflare A record (same terraform apply) can take a minute to
+# propagate. Caddy's own ACME retries would eventually succeed anyway, but
+# waiting here avoids a guaranteed-fail first attempt on a brand new box.
+# (IMDSv2: the instance requires a token, plain IMDSv1-style GETs 401.)
+IMDS_TOKEN="$(curl -fsS -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")"
+MY_IP="$(curl -fsS -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)"
+for i in $(seq 1 30); do
+  RESOLVED="$(dig +short "$DOMAIN" @1.1.1.1 | tail -1 || true)"
+  [ "$RESOLVED" = "$MY_IP" ] && break
+  sleep 10
+done
+
+docker run -d --name caddy --restart unless-stopped --network host \
+  -v /etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
+  -v caddy_data:/data -v caddy_config:/config \
+  --log-driver awslogs --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="$LOG_GROUP" --log-opt awslogs-create-group=true \
+  --log-opt awslogs-stream=caddy \
+  caddy:2-alpine

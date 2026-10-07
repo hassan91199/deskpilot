@@ -1,0 +1,111 @@
+name: demo-up
+
+# Manual, approval-gated: brings the whole on-demand AWS environment up
+# (DP-8) - EC2+Caddy (api + postgres containers), S3+CloudFront frontend,
+# Cloudflare DNS - then smoke-tests it. Pair with demo-down.yml to tear it
+# all back down.
+#
+# One-time setup (see infra/ and the DP-8 plan for the full checklist):
+#   secrets.AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   IAM user for CI
+#   secrets.CLOUDFLARE_API_TOKEN                        DNS-edit scoped token
+#   vars.AWS_REGION                                     e.g. us-east-1
+#   vars.FRONTEND_BUCKET_NAME                           must be globally unique
+#   vars.FRONTEND_DOMAIN_NAME, vars.API_DOMAIN_NAME      deskpilot.hassanabbas.net, api.deskpilot.hassanabbas.net
+#   vars.CLOUDFLARE_ZONE_ID                              hassanabbas.net's zone
+#   vars.OPENAI_API_KEY_PARAM_ARN                        SSM SecureString ARN - never the raw key
+
+on:
+  workflow_dispatch:
+
+jobs:
+  demo-up:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Resolve AWS account ID
+        id: account
+        run: echo "id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure the ECR repo exists
+        run: |
+          aws ecr describe-repositories --repository-names deskpilot \
+            || aws ecr create-repository --repository-name deskpilot
+
+      - name: Compute image tag
+        run: echo "TAG=${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+
+      - name: Build and push image
+        env:
+          IMAGE: ${{ steps.account.outputs.id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/deskpilot
+        run: |
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "${{ steps.account.outputs.id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com"
+          docker build -t "$IMAGE:$TAG" .
+          docker push "$IMAGE:$TAG"
+          echo "IMAGE_URI=$IMAGE:$TAG" >> "$GITHUB_ENV"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16"
+
+      - name: Terraform apply
+        working-directory: infra
+        env:
+          TF_VAR_image_uri: ${{ env.IMAGE_URI }}
+          TF_VAR_frontend_bucket_name: ${{ vars.FRONTEND_BUCKET_NAME }}
+          TF_VAR_frontend_domain_name: ${{ vars.FRONTEND_DOMAIN_NAME }}
+          TF_VAR_api_domain_name: ${{ vars.API_DOMAIN_NAME }}
+          TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TF_VAR_openai_api_key_param_arn: ${{ vars.OPENAI_API_KEY_PARAM_ARN }}
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve -input=false
+          echo "api_instance_ip=$(terraform output -raw api_instance_ip)" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$(terraform output -raw frontend_distribution_id)" >> "$GITHUB_OUTPUT"
+        id: tf
+
+      - name: Build and sync frontend
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://${{ vars.API_DOMAIN_NAME }}
+        run: |
+          npm ci
+          npm run build
+          aws s3 sync out "s3://${{ vars.FRONTEND_BUCKET_NAME }}" --delete
+          aws cloudfront create-invalidation --distribution-id "${{ steps.tf.outputs.distribution_id }}" --paths "/*"
+
+      - name: Smoke the API instance
+        env:
+          # acct-1 is eval.test_set.SESSION_ACCOUNT_ID - hitting it exercises
+          # the real postgres+ingest+API chain end to end.
+          SMOKE_PATH: /accounts/acct-1
+        run: |
+          # Unlike a managed platform, terraform apply only waits for the EC2
+          # instance to reach "running" - not for user-data (postgres boot,
+          # ingest, image pull, container start) to finish. Retry instead of
+          # a single attempt.
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 10 "${{ steps.tf.outputs.api_instance_ip }}$SMOKE_PATH"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::api instance never became healthy"
+          exit 1
+
+      - name: Summary
+        run: |
+          echo "## Environment is up" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Frontend: https://${{ vars.FRONTEND_DOMAIN_NAME }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API: https://${{ vars.API_DOMAIN_NAME }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Frontend custom domain can take a few minutes to resolve (ACM cert issuance + DNS propagation) even though its health check above already passed. The API's custom domain additionally needs Caddy to obtain its own Let's Encrypt certificate on first boot (a minute or two) - if it's not reachable yet, give it a bit longer before sharing the link." >> "$GITHUB_STEP_SUMMARY"
