@@ -8,9 +8,11 @@ alongside the reply.
 
 ## Demo
 
-[`docs/demo/demo.mp4`](docs/demo/demo.mp4) — a 74s local walkthrough of three
-of the ten locked eval queries, run against the real FastAPI backend, real
-Postgres/pgvector, and real OpenAI.
+[`docs/demo/demo.mp4`](docs/demo/demo.mp4) — a ~42s narrated, captioned
+walkthrough of three of the ten locked eval queries, run against the real
+FastAPI backend, real Postgres/pgvector, and real OpenAI. Narration and
+captions are generated (`demo/`, see its scripts) from a real recorded
+session, not scripted or faked.
 
 1. **"How do I rotate an API key?"** — answered from the docs, with the
    source doc titles cited in both the reply and the trace panel.

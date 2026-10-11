@@ -1,0 +1,47 @@
+{
+  "voice": "en-US-AndrewNeural",
+  "scenes": [
+    {
+      "id": "intro",
+      "phrases": [
+        "DeskPilot is an AI support agent",
+        "for a fictional SaaS, Acme Cloud.",
+        "Cited sources,",
+        "account tool calls,",
+        "and automatic ticket escalation—",
+        "all shown live in this trace panel."
+      ]
+    },
+    {
+      "id": "doc-retrieval",
+      "query": "How do I rotate an API key?",
+      "phrases": [
+        "First, a product question:",
+        "\"How do I rotate an API key?\"",
+        "DeskPilot searches the docs",
+        "and cites the source it used."
+      ]
+    },
+    {
+      "id": "account-lookup",
+      "query": "What plan am I on?",
+      "phrases": [
+        "Next, an account question:",
+        "\"What plan am I on?\"",
+        "It looks up the account",
+        "and answers from the real plan data."
+      ]
+    },
+    {
+      "id": "escalation",
+      "query": "I was charged twice, refund me.",
+      "phrases": [
+        "Finally, a billing problem:",
+        "\"I was charged twice, refund me.\"",
+        "DeskPilot can't resolve that itself,",
+        "so it files a support ticket",
+        "and returns the ticket id."
+      ]
+    }
+  ]
+}
